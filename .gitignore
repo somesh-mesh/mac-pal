@@ -1,0 +1,17 @@
+# Node server
+mac-launcher-server/node_modules/
+
+# Flutter
+mac_launcher_app/.dart_tool/
+mac_launcher_app/build/
+mac_launcher_app/.flutter-plugins
+mac_launcher_app/.flutter-plugins-dependencies
+mac_launcher_app/.pub-cache/
+mac_launcher_app/.pub/
+
+# macOS
+.DS_Store
+
+# Android Studio
+mac_launcher_app/.idea/workspace.xml
+mac_launcher_app/.idea/caches/
