@@ -43,6 +43,9 @@ dependencies:
   # Saves Mac IP and port on iPhone so user doesn't retype every launch
   shared_preferences: ^2.2.0
 
+  # Opens remote desktop apps and browser URLs
+  url_launcher: ^6.3.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

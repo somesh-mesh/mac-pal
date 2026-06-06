@@ -19,3 +19,9 @@ class AppOpenException implements Exception {
   @override
   String toString() => 'Could not open $appName';
 }
+
+// Thrown when unlock is attempted but no password is configured on the Mac
+class UnlockNotConfiguredException implements Exception {
+  final String setupCommand;
+  const UnlockNotConfiguredException(this.setupCommand);
+}

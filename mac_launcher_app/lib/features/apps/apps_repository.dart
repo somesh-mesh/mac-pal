@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/dio_client.dart';
-import '../../core/exceptions.dart';
+import '../../core/exceptions.dart' show MacOfflineException, AppOpenException, UnlockNotConfiguredException;
 import 'app_model.dart';
 
 // All communication with the Mac server lives here.
@@ -32,11 +32,42 @@ class AppsRepository {
   }
 
   // GET /ping — returns true if server is reachable, false otherwise
-  // Used by Settings screen connection test and Apps screen status dot
   Future<bool> ping() async {
     try {
       await _dio.get('/ping');
       return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // POST /lock — sends ⌃⌘Q to lock the Mac screen
+  Future<void> lockMac() async {
+    try {
+      await _dio.post('/lock');
+    } on DioException {
+      throw const MacOfflineException();
+    }
+  }
+
+  // POST /unlock — server types the stored password on the lock screen
+  Future<void> unlockMac() async {
+    try {
+      await _dio.post('/unlock');
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 503) {
+        final setup = e.response?.data['setup'] as String? ?? '';
+        throw UnlockNotConfiguredException(setup);
+      }
+      throw const MacOfflineException();
+    }
+  }
+
+  // GET /lock-status — returns whether the screen is currently locked
+  Future<bool> getLockStatus() async {
+    try {
+      final res = await _dio.get('/lock-status');
+      return res.data['locked'] as bool? ?? false;
     } catch (_) {
       return false;
     }

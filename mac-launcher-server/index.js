@@ -14,25 +14,16 @@
 //   node index.js
 // ============================================================
 
-// --- IMPORTS ---
-// express  : web server framework — handles HTTP routes easily
-// cors     : allows your iPhone (a different origin) to call this server
-// fs       : built-in Node module — reads files and folders
-// exec     : built-in — runs shell commands (we use "open -a AppName")
-// os       : built-in — gives us the Mac's hostname for the ping response
+const express            = require('express');
+const cors               = require('cors');
+const fs                 = require('fs');
+const path               = require('path');
+const { exec, execSync, execFile } = require('child_process');
+const os                 = require('os');
 
-const express = require('express');
-const cors    = require('cors');
-const fs      = require('fs');
-const { exec } = require('child_process');
-const os      = require('os');
-
-// --- APP SETUP ---
 const app  = express();
 const PORT = 3000;
 
-// cors()           → allows requests from any origin (your iPhone on same WiFi)
-// express.json()   → lets Express read JSON bodies (needed for POST /open)
 app.use(cors());
 app.use(express.json());
 
@@ -40,131 +31,198 @@ app.use(express.json());
 // ============================================================
 // ENDPOINT 1: GET /ping
 // ============================================================
-// Purpose:
-//   Health check. The Flutter app calls this first to confirm
-//   it can reach your Mac before trying to load the app list.
-//
-// Response:
-//   { "status": "ok", "machine": "Your-MacBook-Name" }
-//
-// Test it:
-//   curl http://localhost:3000/ping
-// ============================================================
 app.get('/ping', (req, res) => {
-  res.json({
-    status: 'ok',
-    machine: os.hostname(), // returns your Mac's name e.g. "Somesh-MacBook-Pro"
-  });
+  res.json({ status: 'ok', machine: os.hostname() });
 });
 
 
 // ============================================================
 // ENDPOINT 2: GET /apps
 // ============================================================
-// Purpose:
-//   Reads your Mac's /Applications folder and returns every
-//   .app file as a JSON array. Flutter displays this list.
-//
-// How it works:
-//   1. Read all entries in /Applications
-//   2. Keep only items ending in ".app"
-//   3. Strip the ".app" suffix for a clean display name
-//   4. Sort alphabetically
-//   5. Send as JSON
+// Scans /Applications, /Applications/Utilities, and ~/Applications
+// so apps in subfolders are included too.
 //
 // Response:
-//   {
-//     "apps": [
-//       { "name": "Safari",  "path": "/Applications/Safari.app" },
-//       { "name": "Xcode",   "path": "/Applications/Xcode.app" },
-//       ...
-//     ]
-//   }
-//
-// Test it:
-//   curl http://localhost:3000/apps
+//   { "apps": [{ "name": "Safari", "path": "/Applications/Safari.app" }, ...] }
 // ============================================================
 app.get('/apps', (req, res) => {
-  try {
-    // Read everything inside /Applications (returns an array of file/folder names)
-    const entries = fs.readdirSync('/Applications');
+  const searchDirs = [
+    '/Applications',
+    '/Applications/Utilities',
+    `${os.homedir()}/Applications`,
+  ];
 
-    const apps = entries
-      .filter(name => name.endsWith('.app'))              // keep only .app bundles
-      .map(name => ({
-        name: name.replace('.app', ''),                   // "Safari.app" → "Safari"
-        path: '/Applications/' + name,                    // full path for reference
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));      // A → Z sort
+  const apps = [];
+  const seen = new Set();
 
-    res.json({ apps });
-
-  } catch (err) {
-    // If /Applications can't be read for some reason, return a 500 error
-    res.status(500).json({ error: err.message });
+  for (const dir of searchDirs) {
+    try {
+      for (const name of fs.readdirSync(dir)) {
+        if (!name.endsWith('.app') || seen.has(name)) continue;
+        seen.add(name);
+        apps.push({ name: name.replace('.app', ''), path: `${dir}/${name}` });
+      }
+    } catch (_) {}
   }
+
+  apps.sort((a, b) => a.name.localeCompare(b.name));
+  res.json({ apps });
 });
 
 
 // ============================================================
 // ENDPOINT 3: POST /open
 // ============================================================
-// Purpose:
-//   Opens any app on your Mac. Flutter sends the app name,
-//   this server runs "open -a AppName" in the Mac shell.
-//
-// Request body (JSON):
-//   { "appName": "Xcode" }
-//
-// How it works:
-//   The "open -a" command is a built-in macOS CLI tool.
-//   It opens any app exactly like double-clicking in Finder.
-//   Example: open -a "Final Cut Pro"
-//
-// Response (success):
-//   { "status": "opened", "app": "Xcode" }
-//
-// Response (failure):
-//   { "error": "Could not open Xcode" }
-//
-// Test it:
-//   curl -X POST http://localhost:3000/open \
-//        -H "Content-Type: application/json" \
-//        -d '{"appName": "Safari"}'
-//
-// PASS: Safari opens on your Mac after running the above command.
-// ============================================================
 app.post('/open', (req, res) => {
   const { appName } = req.body;
+  if (!appName) return res.status(400).json({ error: 'appName is required' });
 
-  // Guard: appName must be present in the request body
-  if (!appName) {
-    return res.status(400).json({ error: 'appName is required' });
-  }
-
-  // Build and run the shell command
-  // The quotes around ${appName} handle apps with spaces (e.g. "Final Cut Pro")
   exec(`open -a "${appName}"`, (err) => {
-    if (err) {
-      // App not found, blocked by permissions, or other OS error
-      return res.status(500).json({ error: 'Could not open ' + appName });
-    }
+    if (err) return res.status(500).json({ error: 'Could not open ' + appName });
     res.json({ status: 'opened', app: appName });
   });
 });
 
 
 // ============================================================
-// START THE SERVER
+// ENDPOINT 4: GET /icon?path=/Applications/Safari.app
 // ============================================================
-// WHY '0.0.0.0' and NOT 'localhost'?
+// Returns a 128×128 PNG icon for the given .app bundle.
+// Extracted from the bundle's .icns file using sips (built into macOS).
+// Results are cached in memory after the first extraction.
 //
-//   'localhost' = only your Mac itself can connect (127.0.0.1)
-//   '0.0.0.0'  = accepts connections from ANY device on the network
+// Test it:
+//   curl "http://localhost:3000/icon?path=/Applications/Safari.app" > icon.png
+// ============================================================
+const iconCache = new Map(); // appPath → Buffer
+
+function findIconFile(appPath) {
+  // Try the icon declared in Info.plist first
+  const plistPath = path.join(appPath, 'Contents', 'Info.plist');
+  try {
+    const raw = execSync(
+      `/usr/libexec/PlistBuddy -c "Print CFBundleIconFile" "${plistPath}"`,
+      { stdio: ['pipe', 'pipe', 'pipe'] }
+    ).toString().trim();
+    const iconFile = raw.endsWith('.icns') ? raw : `${raw}.icns`;
+    const full = path.join(appPath, 'Contents', 'Resources', iconFile);
+    if (fs.existsSync(full)) return full;
+  } catch (_) {}
+
+  // Fallback: first .icns file found in Resources/
+  try {
+    const resourcesDir = path.join(appPath, 'Contents', 'Resources');
+    const icns = fs.readdirSync(resourcesDir).find(f => f.endsWith('.icns'));
+    if (icns) return path.join(resourcesDir, icns);
+  } catch (_) {}
+
+  return null;
+}
+
+app.get('/icon', (req, res) => {
+  const { path: appPath } = req.query;
+  if (!appPath) return res.status(400).json({ error: 'path query param required' });
+
+  if (iconCache.has(appPath)) {
+    res.set('Content-Type', 'image/png');
+    res.set('Cache-Control', 'public, max-age=3600');
+    return res.send(iconCache.get(appPath));
+  }
+
+  const iconSrc = findIconFile(appPath);
+  if (!iconSrc) return res.status(404).json({ error: 'icon not found' });
+
+  const tmpFile = `/tmp/ml_icon_${Date.now()}.png`;
+  try {
+    execSync(`sips -s format png "${iconSrc}" --out "${tmpFile}"`, { stdio: 'pipe' });
+    execSync(`sips --resampleHeightWidth 128 128 "${tmpFile}"`, { stdio: 'pipe' });
+    const buf = fs.readFileSync(tmpFile);
+    try { fs.unlinkSync(tmpFile); } catch (_) {}
+    iconCache.set(appPath, buf);
+    res.set('Content-Type', 'image/png');
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.send(buf);
+  } catch (e) {
+    try { fs.unlinkSync(tmpFile); } catch (_) {}
+    res.status(500).json({ error: 'icon conversion failed' });
+  }
+});
+
+
+// ============================================================
+// LOCK / UNLOCK
+// ============================================================
+// Password setup (run once on your Mac):
+//   echo 'mac_password=YOUR_PASSWORD' > ~/.mac-launcher.conf
+//   chmod 600 ~/.mac-launcher.conf
 //
-//   Your iPhone is a different device. If you use localhost,
-//   the iPhone cannot reach this server even on the same WiFi.
-//   Always use 0.0.0.0 for local network servers.
+// The password is NEVER sent over the network — it lives only
+// on your Mac. The phone just sends "please unlock".
+// ============================================================
+
+const MAC_CONF = path.join(os.homedir(), '.mac-launcher.conf');
+
+function readStoredPassword() {
+  try {
+    const text  = fs.readFileSync(MAC_CONF, 'utf8');
+    const match = text.match(/^mac_password=(.+)$/m);
+    return match ? match[1].trim() : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// POST /lock — sends ⌃⌘Q (Lock Screen shortcut, works on all modern macOS)
+app.post('/lock', (req, res) => {
+  const script = 'tell application "System Events" to keystroke "q" using {control down, command down}';
+  execFile('osascript', ['-e', script], (err) => {
+    if (err) return res.status(500).json({ error: 'Lock failed: ' + err.message });
+    res.json({ status: 'locked' });
+  });
+});
+
+// POST /unlock — wakes the display and types the stored password
+app.post('/unlock', (req, res) => {
+  const password = readStoredPassword();
+  if (!password) {
+    return res.status(503).json({
+      error: 'Password not configured',
+      setup: `echo 'mac_password=YOUR_PASSWORD' > ${MAC_CONF} && chmod 600 ${MAC_CONF}`,
+    });
+  }
+
+  // Escape chars that would break an AppleScript string literal
+  const safe = password.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+  const script = [
+    'tell application "System Events"',
+    '  key code 56',         // Left Shift — wakes display without typing anything
+    '  delay 0.8',           // wait for lock screen to appear
+    `  keystroke "${safe}"`, // type the password
+    '  key code 36',         // press Return
+    'end tell',
+  ].join('\n');
+
+  execFile('osascript', ['-e', script], (err) => {
+    if (err) return res.status(500).json({ error: 'Unlock failed: ' + err.message });
+    res.json({ status: 'unlocked' });
+  });
+});
+
+// GET /lock-status — returns whether the screen is currently locked
+app.get('/lock-status', (req, res) => {
+  try {
+    const out    = execSync('ioreg -n IOHIDSystem', { stdio: ['pipe', 'pipe', 'pipe'], timeout: 3000 }).toString();
+    const locked = out.includes('CGSSessionScreenIsLocked = 1');
+    res.json({ locked });
+  } catch (_) {
+    res.json({ locked: false });
+  }
+});
+
+
+// ============================================================
+// START THE SERVER
 // ============================================================
 app.listen(PORT, '0.0.0.0', () => {
   console.log('');
@@ -175,11 +233,16 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('📋 Test endpoints:');
   console.log('   curl http://localhost:' + PORT + '/ping');
   console.log('   curl http://localhost:' + PORT + '/apps');
+  console.log('   curl "http://localhost:' + PORT + '/icon?path=/Applications/Safari.app" > icon.png');
+  console.log('   curl -X POST http://localhost:' + PORT + '/lock');
+  console.log('   curl -X POST http://localhost:' + PORT + '/unlock');
+  console.log('');
+  console.log('🔐 One-time unlock setup:');
+  console.log(`   echo 'mac_password=YOUR_PASSWORD' > ${MAC_CONF} && chmod 600 ${MAC_CONF}`);
+  const pwdOk = !!readStoredPassword();
+  console.log('   Password file: ' + (pwdOk ? '✅ found' : '⚠️  not set up yet'));
   console.log('');
   console.log('⚠️  Find your Mac IP → run: ipconfig getifaddr en0');
   console.log('   Then test from iPhone Safari: http://YOUR_MAC_IP:' + PORT + '/ping');
   console.log('');
 });
-
-
-/Users/Personal/mac-pal/mac-launcher-server/index.js
