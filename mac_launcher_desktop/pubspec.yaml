@@ -1,0 +1,33 @@
+name: mac_launcher_desktop
+description: "Mac Launcher Desktop - Control your Mac from iPhone"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # Embedded HTTP server (replaces Node.js server entirely)
+  shelf: ^1.4.2
+  shelf_router: ^1.1.4
+
+  # State management
+  flutter_riverpod: ^2.6.1
+
+  # Get local IP address
+  network_info_plus: ^6.0.1
+
+  # macOS window sizing / always-on-top
+  window_manager: ^0.4.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

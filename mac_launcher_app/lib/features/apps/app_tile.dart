@@ -36,6 +36,7 @@ class _AppTileState extends ConsumerState<AppTile> {
               ],
             ),
             backgroundColor: const Color(0xFF30D158),
+            behavior: SnackBarBehavior.floating,
             margin: const EdgeInsets.all(16),
             duration: const Duration(seconds: 2),
           ),
@@ -47,6 +48,7 @@ class _AppTileState extends ConsumerState<AppTile> {
           SnackBar(
             content: Text('Could not open ${widget.name}'),
             backgroundColor: const Color(0xFFFF453A),
+            behavior: SnackBarBehavior.floating,
             margin: const EdgeInsets.all(16),
           ),
         );
@@ -57,6 +59,7 @@ class _AppTileState extends ConsumerState<AppTile> {
           const SnackBar(
             content: Text('Could not reach Mac'),
             backgroundColor: Color(0xFFFF453A),
+            behavior: SnackBarBehavior.floating,
             margin: EdgeInsets.all(16),
           ),
         );

@@ -49,6 +49,8 @@ app.get('/apps', (req, res) => {
   const searchDirs = [
     '/Applications',
     '/Applications/Utilities',
+    '/System/Applications',
+    '/System/Applications/Utilities',
     `${os.homedir()}/Applications`,
   ];
 
